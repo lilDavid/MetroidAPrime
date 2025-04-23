@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from logging import Logger
 from typing import Any
 import dolphin_memory_engine  # type: ignore
@@ -7,11 +8,45 @@ import Utils
 GC_GAME_ID_ADDRESS = 0x80000000
 
 
-class DolphinException(Exception):
+class GameCubeException(Exception):
     pass
 
 
-class DolphinClient:
+class DolphinException(GameCubeException):
+    pass
+
+
+class GameCubeClient(ABC):
+    @abstractmethod
+    def is_connected(self):
+        ...
+
+    @abstractmethod
+    def connect(self):
+        ...
+
+    @abstractmethod
+    def disconnect(self):
+        ...
+
+    @abstractmethod
+    def read_pointer(self, pointer: int, offset: int, byte_count: int) -> Any:
+        ...
+
+    @abstractmethod
+    def read_address(self, address: int, bytes_to_read: int) -> Any:
+        ...
+
+    @abstractmethod
+    def write_pointer(self, pointer: int, offset: int, data: Any):
+        ...
+
+    @abstractmethod
+    def write_address(self, address: int, data: Any):
+        ...
+
+
+class DolphinClient(GameCubeClient):
     dolphin: dolphin_memory_engine  # type: ignore
     logger: Logger
 
