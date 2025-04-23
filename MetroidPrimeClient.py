@@ -24,8 +24,8 @@ from .Items import suit_upgrade_table
 from .ClientReceiveItems import handle_receive_items
 from .NotificationManager import NotificationManager
 from .Container import construct_hook_patch
-from .DolphinClient import (
-    DolphinException,
+from .GameCubeClient import (
+    GameCubeException,
     assert_no_running_dolphin,
     get_num_dolphin_instances,
 )
@@ -207,7 +207,7 @@ async def dolphin_sync_task(ctx: MetroidPrimeContext):
                 await _handle_game_not_ready(ctx)
                 await asyncio.sleep(1)
         except Exception as e:
-            if isinstance(e, DolphinException):
+            if isinstance(e, GameCubeException):
                 logger.error(str(e))
             else:
                 logger.error(traceback.format_exc())
