@@ -18,7 +18,7 @@ async def handle_receive_items(
     ctx: "MetroidPrimeContext", current_items: Dict[str, InventoryItemData]
 ):
     # Will be used when consumables are implemented
-    # current_index = ctx.game_interface.get_last_received_index()
+    # current_index = await ctx.game_interface.get_last_received_index()
     for network_item in ctx.items_received:
         item_data = inventory_item_by_network_id(network_item.item, current_items)
         if item_data is None:
@@ -40,12 +40,12 @@ async def handle_receive_items(
             item_data.max_capacity == 1
             or item_data.name in ITEMS_USED_FOR_LOCATION_TRACKING
         ):
-            give_item_if_not_owned(ctx, item_data, network_item)
+            await give_item_if_not_owned(ctx, item_data, network_item)
         elif item_data.max_capacity > 1:
             continue
     # Not used until consumables are implemented but keeping it here to see if it breaks anything and gets reported
     new_index = len(ctx.items_received) - 1
-    ctx.game_interface.set_last_received_index(new_index)
+    await ctx.game_interface.set_last_received_index(new_index)
 
     await handle_receive_missiles(ctx, current_items)
     await handle_receive_power_bombs(ctx, current_items)
@@ -56,16 +56,16 @@ async def handle_receive_items(
     await handle_cosmetic_suit(ctx, current_items)
 
     # Handle Artifacts
-    ctx.game_interface.sync_artifact_layers()
+    await ctx.game_interface.sync_artifact_layers()
 
 
-def give_item_if_not_owned(
+async def give_item_if_not_owned(
     ctx: "MetroidPrimeContext", item_data: InventoryItemData, network_item: NetworkItem
 ):
     """Gives the item and notifies"""
     if item_data.current_amount == 0:
         max_capacity = 1
-        ctx.game_interface.give_item_to_player(
+        await ctx.game_interface.give_item_to_player(
             item_data.id,
             1,
             max_capacity,
@@ -80,10 +80,10 @@ def give_item_if_not_owned(
             )
 
 
-def disable_item_if_owned(ctx: "MetroidPrimeContext", item_data: InventoryItemData):
+async def disable_item_if_owned(ctx: "MetroidPrimeContext", item_data: InventoryItemData):
     """Disables the item and notifies"""
     if item_data.current_amount > 0:
-        ctx.game_interface.give_item_to_player(
+        await ctx.game_interface.give_item_to_player(
             item_data.id, 0, 0, item_data.name in ITEMS_USED_FOR_LOCATION_TRACKING
         )
         ctx.notification_manager.queue_notification(f"{item_data.name} offline")
@@ -94,7 +94,7 @@ async def handle_cosmetic_suit(
 ):
     if ctx.cosmetic_suit == None:
         return
-    ctx.game_interface.set_current_suit(ctx.cosmetic_suit)
+    await ctx.game_interface.set_current_suit(ctx.cosmetic_suit)
 
 
 async def handle_disable_gravity_suit(
@@ -103,7 +103,7 @@ async def handle_disable_gravity_suit(
     if ctx.gravity_suit_enabled:
         return
     item = current_items[SuitUpgrade.Gravity_Suit.value]
-    disable_item_if_owned(ctx, item)
+    await disable_item_if_owned(ctx, item)
 
 
 async def handle_receive_missiles(
@@ -148,7 +148,7 @@ async def handle_receive_missiles(
         diff = new_capacity - current_capacity
         new_amount = min(current_amount + diff, new_capacity)
 
-        ctx.game_interface.give_item_to_player(
+        await ctx.game_interface.give_item_to_player(
             missile_item.id, new_amount, new_capacity
         )
         if missile_sender != ctx.slot and diff > 0 and missile_sender != None:
@@ -207,7 +207,7 @@ async def handle_receive_power_bombs(
         diff = new_capacity - current_capacity
         new_amount = min(current_amount + diff, new_capacity)
 
-        ctx.game_interface.give_item_to_player(pb_item.id, new_amount, new_capacity)
+        await ctx.game_interface.give_item_to_player(pb_item.id, new_amount, new_capacity)
         if pb_sender != ctx.slot and diff > 0 and pb_sender != None:
             message = (
                 f"Power Bomb capacity increased by {diff}"
@@ -240,7 +240,7 @@ async def handle_receive_energy_tanks(
             and energy_tank_item.current_capacity < energy_tank_item.max_capacity
         ):
             new_capacity = min(num_energy_tanks_received, energy_tank_item.max_capacity)
-            ctx.game_interface.give_item_to_player(
+            await ctx.game_interface.give_item_to_player(
                 energy_tank_item.id, new_capacity, new_capacity
             )
 
@@ -254,7 +254,7 @@ async def handle_receive_energy_tanks(
 
             # Heal player when they receive a new energy tank
             # Player starts with 99 health and each energy tank adds 100 additional
-            ctx.game_interface.set_current_health(new_capacity * 100.0 + 99)
+            await ctx.game_interface.set_current_health(new_capacity * 100.0 + 99)
 
 
 async def handle_receive_progressive_items(
@@ -285,7 +285,7 @@ async def handle_receive_progressive_items(
                 ][i]
                 inventory_item = current_items[item.value]
                 network_item = network_items[progressive_upgrade][i]
-                give_item_if_not_owned(ctx, inventory_item, network_item)
+                await give_item_if_not_owned(ctx, inventory_item, network_item)
 
 
 def inventory_item_by_network_id(

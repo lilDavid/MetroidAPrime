@@ -1,11 +1,11 @@
 from abc import ABC, abstractmethod
+import asyncio
 from enum import IntEnum, IntFlag
 import itertools
 from logging import Logger
 import struct
 from typing import Any, NamedTuple, cast
 import dolphin_memory_engine  # type: ignore
-import socket
 import subprocess
 import Utils
 
@@ -30,27 +30,27 @@ class GameCubeClient(ABC):
         ...
 
     @abstractmethod
-    def connect(self):
+    async def connect(self):
         ...
 
     @abstractmethod
-    def disconnect(self):
+    async def disconnect(self):
         ...
 
     @abstractmethod
-    def read_pointer(self, pointer: int, offset: int, byte_count: int) -> Any:
+    async def read_pointer(self, pointer: int, offset: int, byte_count: int) -> Any:
         ...
 
     @abstractmethod
-    def read_address(self, address: int, bytes_to_read: int) -> Any:
+    async def read_address(self, address: int, bytes_to_read: int) -> Any:
         ...
 
     @abstractmethod
-    def write_pointer(self, pointer: int, offset: int, data: Any):
+    async def write_pointer(self, pointer: int, offset: int, data: Any):
         ...
 
     @abstractmethod
-    def write_address(self, address: int, data: Any):
+    async def write_address(self, address: int, data: Any):
         ...
 
 
@@ -69,7 +69,7 @@ class DolphinClient(GameCubeClient):
         except Exception:
             return False
 
-    def connect(self):
+    async def connect(self):
         if not self.dolphin.is_hooked():
             self.dolphin.hook()
         if not self.dolphin.is_hooked():
@@ -77,28 +77,28 @@ class DolphinClient(GameCubeClient):
                 "Could not connect to Dolphin, verify that you have a game running in the emulator"
             )
 
-    def disconnect(self):
+    async def disconnect(self):
         if self.dolphin.is_hooked():
             self.dolphin.un_hook()
 
-    def __assert_connected(self):
+    async def __assert_connected(self):
         """Custom assert function that returns a DolphinException instead of a generic RuntimeError if the connection is lost"""
         try:
             self.dolphin.assert_hooked()
             # For some reason the dolphin_memory_engine.is_hooked() function doesn't recognize when the game is closed, checking if memory is available will assert the connection is alive
             self.dolphin.read_bytes(GC_GAME_ID_ADDRESS, 1)
         except RuntimeError as e:
-            self.disconnect()
+            await self.disconnect()
             raise DolphinException(e)
 
-    def verify_target_address(self, target_address: int, read_size: int):
+    async def verify_target_address(self, target_address: int, read_size: int):
         """Ensures that the target address is within the valid range for GC memory"""
         if target_address < 0x80000000 or target_address + read_size > 0x81800000:
             raise DolphinException(
                 f"{target_address:x} -> {target_address + read_size:x} is not a valid for GC memory"
             )
 
-    def read_pointer(self, pointer: int, offset: int, byte_count: int) -> Any:
+    async def read_pointer(self, pointer: int, offset: int, byte_count: int) -> Any:
         self.__assert_connected()
 
         address = None
@@ -111,15 +111,15 @@ class DolphinClient(GameCubeClient):
             raise DolphinException("Dolphin no longer connected")
 
         address += offset
-        return self.read_address(address, byte_count)
+        return await self.read_address(address, byte_count)
 
-    def read_address(self, address: int, bytes_to_read: int) -> Any:
+    async def read_address(self, address: int, bytes_to_read: int) -> Any:
         self.__assert_connected()
         self.verify_target_address(address, bytes_to_read)
         result = self.dolphin.read_bytes(address, bytes_to_read)
         return result
 
-    def write_pointer(self, pointer: int, offset: int, data: Any):
+    async def write_pointer(self, pointer: int, offset: int, data: Any):
         self.__assert_connected()
         address = None
         try:
@@ -131,9 +131,9 @@ class DolphinClient(GameCubeClient):
             raise DolphinException("Dolphin no longer connected")
 
         address += offset
-        return self.write_address(address, data)
+        return await self.write_address(address, data)
 
-    def write_address(self, address: int, data: Any):
+    async def write_address(self, address: int, data: Any):
         self.__assert_connected()
         result = self.dolphin.write_bytes(address, data)
         return result
@@ -233,50 +233,56 @@ class NintendontMetaInfo(NamedTuple):
 class NintendontClient(GameCubeClient):
     address: str | None
     meta_info: NintendontMetaInfo | None
-    sock: socket.socket | None
+    reader: asyncio.StreamReader
+    writer: asyncio.StreamWriter
+    stream_lock: asyncio.Lock
     logger: Logger
 
     def __init__(self, logger: Logger):
         self.address = None
         self.meta_info = None
-        self.sock = None
+        self.reader = None
+        self.writer = None
+        self.stream_lock = asyncio.Lock()
         self.logger = logger
 
     def is_connected(self):
-        return self.address is not None and self.sock is not None
+        return self.address is not None and self.reader is not None and self.writer is not None
 
-    def set_address(self, new_address: str | None):
+    async def set_address(self, new_address: str | None):
         if new_address != self.address and self.is_connected():
             self.logger.info("Nintendont address changed, disconnecting.")
-            self.disconnect()
+            await self.disconnect()
         self.address = new_address
 
-    def connect(self):
+    async def connect(self):
         if self.address is None:
             raise NintendontException("Address is not set")
 
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            self.sock.connect((self.address, NINTENDONT_PORT))
+            self.reader, self.writer = await asyncio.open_connection(self.address, NINTENDONT_PORT)
         except OSError as e:
-            self.sock = None
             raise NintendontException from e
 
-        data = struct.pack(">BBBB", NintendontMemoryOperationType.REQUEST_VERSION, 0, 0, True)
-        result = self.__write_to_socket(data)
-        self.meta_info = NintendontMetaInfo._make(struct.unpack(">IIII", result))
-        self.logger.debug(f"Protocol version: {self.meta_info.protocol_version}")
-        self.logger.debug(f"Max input bytes: {self.meta_info.max_input_bytes}")
-        self.logger.debug(f"Max output bytes: {self.meta_info.max_output_bytes}")
-        self.logger.debug(f"Max addresses: {self.meta_info.max_addresses}")
+        try:
+            data = struct.pack(">BBBB", NintendontMemoryOperationType.REQUEST_VERSION, 0, 0, True)
+            result = await self.__write_to_socket(data)
+            self.meta_info = NintendontMetaInfo._make(struct.unpack(">IIII", result))
+            self.logger.debug(f"Protocol version: {self.meta_info.protocol_version}")
+            self.logger.debug(f"Max input bytes: {self.meta_info.max_input_bytes}")
+            self.logger.debug(f"Max output bytes: {self.meta_info.max_output_bytes}")
+            self.logger.debug(f"Max addresses: {self.meta_info.max_addresses}")
+        except:
+            await self.disconnect()
+            raise
 
-    def disconnect(self):
-        if self.sock is not None:
-            self.sock.close()
-        self.sock = None
-        self.meta_info = None
+    async def disconnect(self):
+        if self.meta_info is not None:
+            self.writer.close()
+            await self.writer.wait_closed()
+        self.reader = self.writer = self.meta_info = None
 
-    def __request_operations(self, addresses: list[int], memory_operations: list[NintendontOperation]) -> list[bytes | None]:
+    async def __request_operations(self, addresses: list[int], memory_operations: list[NintendontOperation]) -> list[bytes | None]:
         if len(addresses) > self.meta_info.max_addresses:
             raise NintendontException(f"Too many addresses: Max is {self.meta_info.max_addresses}, got {len(addresses)}")
 
@@ -287,40 +293,51 @@ class NintendontClient(GameCubeClient):
         if len(data) > self.meta_info.max_input_bytes:
             self.logger.warning(f"Command too long: {data.hex()}")
             raise NintendontException(f"Command too long: Max {self.meta_info.max_input_bytes} bytes, got {len(data)}")
-        response = self.__write_to_socket(data)
+        response = await self.__write_to_socket(data)
 
         results: list[bytes | None] = []
         current_index = ((len(memory_operations) - 1) // 8 + 1)
         success_bytes = response[:current_index]
         for i, op in enumerate(memory_operations):
             index = i // 8
-            if success_bytes[index]:
+            if success_bytes[index] & (1 << (i % 8)):
                 if op.is_read():
-                    results.append(response[current_index:current_index + op.size])
+                    result = response[current_index:current_index + op.size]
+                    assert len(result) == op.size, f"Result: {result.hex()}, expected {op.size} bytes at index {current_index}"
+                    results.append(result)
+                    current_index += op.size
                 else:
                     results.append(b'')
             else:
                 results.append(None)
         return results
 
-    def __write_to_socket(self, data: bytes | bytearray) -> bytes:
-        assert self.sock is not None
+    async def __atomic_request(self, data: bytes | bytearray) -> bytes:
         try:
-            self.sock.send(data)
-            response = self.sock.recv(1024)
+            await self.stream_lock.acquire()
+            self.writer.write(data)
+            await self.writer.drain()
+            return await self.reader.read(1024)
+        finally:
+            self.stream_lock.release()
+
+    async def __write_to_socket(self, data: bytes | bytearray) -> bytes:
+        assert self.reader is not None and self.writer is not None
+        try:
+            response = await self.__atomic_request(data)
             if response == b'':
-                self.disconnect()
+                await self.disconnect()
                 raise NintendontException("Connection was closed")
             return response
         except OSError as e:
-            self.disconnect()
+            await self.disconnect()
             raise NintendontException from e
 
-    def read_pointer(self, pointer: int, offset: int, byte_count: int) -> Any:
-        return self.__request_operations([pointer], [NintendontOperation.make_read(0, byte_count, offset)])[0]
+    async def read_pointer(self, pointer: int, offset: int, byte_count: int) -> Any:
+        return (await self.__request_operations([pointer], [NintendontOperation.make_read(0, byte_count, offset)]))[0]
 
-    def read_address(self, address: int, bytes_to_read: int) -> Any:
-        result = self.__request_operations([address], [NintendontOperation.make_read(0, bytes_to_read)])[0]
+    async def read_address(self, address: int, bytes_to_read: int) -> Any:
+        result = (await self.__request_operations([address], [NintendontOperation.make_read(0, bytes_to_read)]))[0]
         if result == None:
             raise NintendontException(f"{address:x} -> {address + bytes_to_read:x} is not a valid for GC memory")
         return result
@@ -328,10 +345,10 @@ class NintendontClient(GameCubeClient):
     # TODO: Find out what dolphin memory engine write_bytes() returns to match DolphinClient behavior. Currently assumed
     # to be the original value that was overwritten
 
-    def write_pointer(self, pointer: int, offset: int, data: Any):
-        return self.__request_operations([pointer], [NintendontOperation.make_write(True, 0, cast(bytes, data), offset)])[0]
+    async def write_pointer(self, pointer: int, offset: int, data: Any):
+        return (await self.__request_operations([pointer], [NintendontOperation.make_write(True, 0, cast(bytes, data), offset)]))[0]
 
-    def write_address(self, address: int, data: Any):
+    async def write_address(self, address: int, data: Any):
         # FIXME: Only read_address() raises on bad address. NintendontClient has the same asymmetry to maintain the same
         # behavior as DolphinClient
-        return self.__request_operations([address], [NintendontOperation.make_write(True, 0, cast(bytes, data))])[0]
+        return (await self.__request_operations([address], [NintendontOperation.make_write(True, 0, cast(bytes, data))]))[0]
