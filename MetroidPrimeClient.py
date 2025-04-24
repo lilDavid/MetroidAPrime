@@ -103,6 +103,15 @@ class MetroidPrimeCommandProcessor(ClientCommandProcessor):
         logger.info(f"Setting cosmetic suit to: {suit.name} Suit")
         self.ctx.cosmetic_suit = suit
 
+    def _cmd_set_nintendont_address(self, input: str):
+        """Set the IP address to connect to a Wii or Wii U running Nintendont. Set to None to play on Dolphin."""
+        if input == "None":
+            self.ctx.nintendont_ip = None
+            logger.info("Starting Dolphin connector")
+        else:
+            self.ctx.nintendont_ip = input
+            logger.info(f"Starting Nintendont connector at {input}")
+
 
 status_messages = {
     ConnectionState.IN_GAME: "Connected to Metroid Prime",
@@ -123,6 +132,8 @@ class MetroidPrimeContext(CommonContext):
     items_handling = 0b111
     dolphin_sync_task: Optional[asyncio.Task[Any]] = None
     connection_state = ConnectionState.DISCONNECTED
+    has_sent_nintendont_warning = False
+    nintendont_ip = None
     slot_data: Dict[str, Utils.Any] = {}
     death_link_enabled = False
     gravity_suit_enabled: bool = True
@@ -193,10 +204,17 @@ async def dolphin_sync_task(ctx: MetroidPrimeContext):
     if ctx.apmp1_file:
         Utils.async_start(patch_and_run_game(ctx.apmp1_file))
 
-    logger.info("Starting Dolphin Connector, attempting to connect to emulator...")
+    ctx.nintendont_ip = Utils.get_settings()["metroidprime_options"]["nintendont_address"]
+    logger.info(f"Starting {'Dolphin' if ctx.nintendont_ip is None else 'Nintendont'} Connector, attempting to connect "
+                f"to {'emulator' if ctx.nintendont_ip is None else f'console at {ctx.nintendont_ip}'}...")
 
     while not ctx.exit_event.is_set():
         try:
+            if ctx.nintendont_ip is not None and not ctx.has_sent_nintendont_warning:
+                logger.warning("Nintendont support is experimental. You may experience bugs or poor performance.")
+                ctx.has_sent_nintendont_warning = True
+            await ctx.game_interface.set_nintendont_ip(ctx.nintendont_ip)
+
             connection_state = await ctx.game_interface.get_connection_state()
             update_connection_status(ctx, connection_state)
             if connection_state == ConnectionState.IN_MENU:
