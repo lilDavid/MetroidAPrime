@@ -27,7 +27,8 @@ All suit upgrades and expansion items can be shuffled in other players' worlds, 
 
 ### What does another world's item look like in Metroid Prime?
 
-Multiworld items appear as one of the following:
+Items for other Metroid games appear as their counterparts in Metroid Prime where applicable. Otherwise, multiworld
+items appear as one of the following:
 
 - Progression Item: Cog
 - Useful Item: Metroid Model with a random texture
