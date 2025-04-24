@@ -28,6 +28,7 @@ from ..Locations import MetroidPrimeLocation, every_location
 from .RoomNames import RoomName
 from .Tricks import TrickInfo
 from .DoorData import DoorData
+from .ItemModels import ItemModel, native_item_mapping, remote_item_mapping
 
 if typing.TYPE_CHECKING:
     from .. import MetroidPrimeWorld
@@ -51,31 +52,20 @@ def get_config_item_text(world: "MetroidPrimeWorld", location: str) -> str:
 def get_config_item_model(world: "MetroidPrimeWorld", location: str) -> str:
     loc = world.get_location(location)
     assert loc.item
+    name = loc.item.name
+
     if loc.native_item:
-        name = loc.item.name
-        if name == SuitUpgrade.Missile_Expansion.value:
-            return "Missile"
-        if name == SuitUpgrade.Missile_Launcher.value:
-            return "Shiny Missile"
-        if name == SuitUpgrade.Main_Power_Bomb.value:
-            return "Power Bomb"
-        if (
-            name == ProgressiveUpgrade.Progressive_Power_Beam.value
-            or name == SuitUpgrade.Power_Beam.value
-        ):
-            return "Super Missile"
-        if name == ProgressiveUpgrade.Progressive_Wave_Beam.value:
-            return "Wave Beam"
-        if name == ProgressiveUpgrade.Progressive_Ice_Beam.value:
-            return "Ice Beam"
-        if name == ProgressiveUpgrade.Progressive_Plasma_Beam.value:
-            return "Plasma Beam"
-        return name
+        return native_item_mapping.get(name, name)
+
+    model = remote_item_mapping.get((loc.item.game, name), None)
+    if model is not None:
+        return model
+
     if loc.item.advancement:
-        return "Cog"
+        return ItemModel.Cog
     if loc.item.useful or loc.item.trap:
-        return "Zoomer"
-    return "Nothing"
+        return ItemModel.Zoomer
+    return ItemModel.Metroid
 
 
 @dataclass
