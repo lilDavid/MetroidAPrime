@@ -51,7 +51,7 @@ class MetroidPrimeCommandProcessor(ClientCommandProcessor):
         self.ctx.notification_manager.queue_notification(" ".join(map(str, args)))
 
     def _cmd_status(self, *args: List[Any]):
-        """Display the current dolphin connection status."""
+        """Display the current game connection status."""
         logger.info(f"Connection status: {status_messages[self.ctx.connection_state]}")
 
     def _cmd_deathlink(self):
@@ -103,11 +103,20 @@ class MetroidPrimeCommandProcessor(ClientCommandProcessor):
         logger.info(f"Setting cosmetic suit to: {suit.name} Suit")
         self.ctx.cosmetic_suit = suit
 
+    def _cmd_set_nintendont_address(self, input: str):
+        """Set the IP address to connect to a Wii or Wii U running Nintendont. Set to None to play on Dolphin."""
+        if input == "None":
+            self.ctx.nintendont_ip = None
+            logger.info("Starting Dolphin connector")
+        else:
+            self.ctx.nintendont_ip = input
+            logger.info(f"Starting Nintendont connector at {input}")
+
 
 status_messages = {
     ConnectionState.IN_GAME: "Connected to Metroid Prime",
     ConnectionState.IN_MENU: "Connected to game, waiting for game to start",
-    ConnectionState.DISCONNECTED: "Unable to connect to the Dolphin instance, attempting to reconnect...",
+    ConnectionState.DISCONNECTED: "Unable to connect to game, attempting to reconnect...",
     ConnectionState.MULTIPLE_DOLPHIN_INSTANCES: "Warning: Multiple Dolphin instances detected, client may not function correctly.",
 }
 
@@ -121,8 +130,10 @@ class MetroidPrimeContext(CommonContext):
     notification_manager: NotificationManager
     game = "Metroid Prime"
     items_handling = 0b111
-    dolphin_sync_task: Optional[asyncio.Task[Any]] = None
+    game_sync_task: Optional[asyncio.Task[Any]] = None
     connection_state = ConnectionState.DISCONNECTED
+    has_sent_nintendont_warning = False
+    nintendont_ip = None
     slot_data: Dict[str, Utils.Any] = {}
     death_link_enabled = False
     gravity_suit_enabled: bool = True
@@ -182,7 +193,7 @@ def update_connection_status(ctx: MetroidPrimeContext, status: ConnectionState):
         ctx.connection_state = status
 
 
-async def dolphin_sync_task(ctx: MetroidPrimeContext):
+async def game_sync_task(ctx: MetroidPrimeContext):
     try:
         # This will not work if the client is running from source
         version = get_apworld_version()
@@ -193,10 +204,17 @@ async def dolphin_sync_task(ctx: MetroidPrimeContext):
     if ctx.apmp1_file:
         Utils.async_start(patch_and_run_game(ctx.apmp1_file))
 
-    logger.info("Starting Dolphin Connector, attempting to connect to emulator...")
+    ctx.nintendont_ip = Utils.get_settings()["metroidprime_options"]["nintendont_address"]
+    logger.info(f"Starting {'Dolphin' if ctx.nintendont_ip is None else 'Nintendont'} Connector, attempting to connect "
+                f"to {'emulator' if ctx.nintendont_ip is None else f'console at {ctx.nintendont_ip}'}...")
 
     while not ctx.exit_event.is_set():
         try:
+            if ctx.nintendont_ip is not None and not ctx.has_sent_nintendont_warning:
+                logger.warning("Nintendont support is experimental. You may experience bugs or poor performance.")
+                ctx.has_sent_nintendont_warning = True
+            await ctx.game_interface.set_nintendont_ip(ctx.nintendont_ip)
+
             connection_state = await ctx.game_interface.get_connection_state()
             update_connection_status(ctx, connection_state)
             if connection_state == ConnectionState.IN_MENU:
@@ -444,8 +462,8 @@ def launch():
         ctx.run_cli()
 
         logger.info("Running game...")
-        ctx.dolphin_sync_task = asyncio.create_task(
-            dolphin_sync_task(ctx), name="Dolphin Sync"
+        ctx.game_sync_task = asyncio.create_task(
+            game_sync_task(ctx), name="GameCube Sync"
         )
 
         await ctx.exit_event.wait()
@@ -453,9 +471,9 @@ def launch():
 
         await ctx.shutdown()
 
-        if ctx.dolphin_sync_task:
+        if ctx.game_sync_task:
             await asyncio.sleep(3)
-            await ctx.dolphin_sync_task
+            await ctx.game_sync_task
 
     import colorama
 

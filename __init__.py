@@ -96,8 +96,15 @@ class MetroidPrimeSettings(settings.Group):
         Alternatively, set it to a path to a program to open the .iso file with (like Dolplhin)
         """
 
+    class NintendontAddress(str):
+        """
+        Set this to null to connect the client to Dolphin by default.
+        Set it to your Wii or Wii U's IP address to connect to it using Nintendont when the client starts.
+        """
+
     rom_file: RomFile = RomFile(RomFile.copy_to)
     rom_start: typing.Union[RomStart, bool] = False
+    nintendont_address: typing.Optional[NintendontAddress] = None
 
 
 class MetroidPrimeWeb(WebWorld):

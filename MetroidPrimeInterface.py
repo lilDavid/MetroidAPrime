@@ -199,12 +199,22 @@ class MetroidPrimeInterface:
     _previous_message_size: int = 0
     game_id_error: Optional[str] = None
     game_rev_error: int
-    current_game: Optional[str]
+    current_game: Optional[str] = None
     relay_trackers: Optional[Dict[Any, Any]]
 
     def __init__(self, logger: Logger) -> None:
         self.logger = logger
         self.gamecube_client = DolphinClient(logger)
+
+    async def set_nintendont_ip(self, address: str | None):
+        if address is None and type(self.gamecube_client) is NintendontClient:
+            await self.gamecube_client.disconnect()
+            self.gamecube_client = DolphinClient(self.logger)
+        elif address is not None and type(self.gamecube_client) is DolphinClient:
+            await self.gamecube_client.disconnect()
+            self.gamecube_client = NintendontClient(self.logger)
+        if address is not None:
+            await self.gamecube_client.set_address(address)
 
     async def give_item_to_player(
         self,
@@ -377,7 +387,7 @@ class MetroidPrimeInterface:
             )
 
     async def connect_to_game(self):
-        """Initializes the connection to dolphin and verifies it is connected to Metroid Prime"""
+        """Initializes the connection to Dolphin or Nintendont and verifies it is connected to Metroid Prime"""
         try:
             await self.gamecube_client.connect()
             game_id = await self.gamecube_client.read_address(GC_GAME_ID_ADDRESS, 6)
@@ -414,7 +424,7 @@ class MetroidPrimeInterface:
 
     async def disconnect_from_game(self):
         await self.gamecube_client.disconnect()
-        self.logger.info("Disconnected from Dolphin Emulator")
+        self.logger.info(f"Disconnected from {'Dolphin Emulator' if type(self.gamecube_client) is DolphinClient else 'Nintendont'}")
 
     async def get_connection_state(self):
         try:

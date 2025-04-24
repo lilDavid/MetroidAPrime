@@ -77,18 +77,21 @@ class DolphinClient(GameCubeClient):
                 "Could not connect to Dolphin, verify that you have a game running in the emulator"
             )
 
-    async def disconnect(self):
+    def __disconnect(self):
         if self.dolphin.is_hooked():
             self.dolphin.un_hook()
 
-    async def __assert_connected(self):
+    async def disconnect(self):
+        self.__disconnect()
+
+    def __assert_connected(self):
         """Custom assert function that returns a DolphinException instead of a generic RuntimeError if the connection is lost"""
         try:
             self.dolphin.assert_hooked()
             # For some reason the dolphin_memory_engine.is_hooked() function doesn't recognize when the game is closed, checking if memory is available will assert the connection is alive
             self.dolphin.read_bytes(GC_GAME_ID_ADDRESS, 1)
         except RuntimeError as e:
-            await self.disconnect()
+            self.__disconnect()
             raise DolphinException(e)
 
     async def verify_target_address(self, target_address: int, read_size: int):
@@ -277,9 +280,12 @@ class NintendontClient(GameCubeClient):
             raise
 
     async def disconnect(self):
-        if self.meta_info is not None:
-            self.writer.close()
-            await self.writer.wait_closed()
+        try:
+            if self.meta_info is not None:
+                self.writer.close()
+                await self.writer.wait_closed()
+        except TimeoutError:
+            pass
         self.reader = self.writer = self.meta_info = None
 
     async def __request_operations(self, addresses: list[int], memory_operations: list[NintendontOperation]) -> list[bytes | None]:
