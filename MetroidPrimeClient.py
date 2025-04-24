@@ -137,10 +137,7 @@ class MetroidPrimeContext(CommonContext):
     ):
         super().__init__(server_address, password)
         self.game_interface = MetroidPrimeInterface(logger)
-        self.notification_manager = NotificationManager(
-            # FIXME
-            HUD_MESSAGE_DURATION, lambda message: Utils.async_start(self.game_interface.send_hud_message(message))
-        )
+        self.notification_manager = NotificationManager(HUD_MESSAGE_DURATION, self.game_interface.send_hud_message)
         self.apmp1_file = apmp1_file
 
     def on_deathlink(self, data: Utils.Dict[str, Utils.Any]) -> None:
@@ -276,7 +273,7 @@ async def _handle_game_ready(ctx: MetroidPrimeContext):
         await ctx.game_interface.update_relay_tracker_cache()
         current_inventory = await ctx.game_interface.get_current_inventory()
         await handle_receive_items(ctx, current_inventory)
-        ctx.notification_manager.handle_notifications()
+        await ctx.notification_manager.handle_notifications()
         await handle_checked_location(ctx, current_inventory)
         await handle_check_goal_complete(ctx)
         await handle_tracker_level(ctx)
