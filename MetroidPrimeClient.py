@@ -79,13 +79,16 @@ class MetroidPrimeCommandProcessor(ClientCommandProcessor):
         if input == "None":
             logger.info("Removing cosmetic suit")
             self.ctx.cosmetic_suit = None
-            suit = self.ctx.game_interface.get_highest_owned_suit()
-            self.ctx.game_interface.set_cosmetic_suit_by_id(
-                suit_upgrade_table[suit.value].id
-            )
-            self.ctx.game_interface.set_current_suit(
-                self.ctx.game_interface.get_current_cosmetic_suit()
-            )
+            # FIXME
+            async def set_suit():
+                suit = await self.ctx.game_interface.get_highest_owned_suit()
+                await self.ctx.game_interface.set_cosmetic_suit_by_id(
+                    suit_upgrade_table[suit.value].id
+                )
+                await self.ctx.game_interface.set_current_suit(
+                    await self.ctx.game_interface.get_current_cosmetic_suit()
+                )
+            Utils.async_start(set_suit())
             return
         suit = MetroidPrimeSuit.get_by_key(input)
         if suit is None:
@@ -135,13 +138,15 @@ class MetroidPrimeContext(CommonContext):
         super().__init__(server_address, password)
         self.game_interface = MetroidPrimeInterface(logger)
         self.notification_manager = NotificationManager(
-            HUD_MESSAGE_DURATION, self.game_interface.send_hud_message
+            # FIXME
+            HUD_MESSAGE_DURATION, lambda message: Utils.async_start(self.game_interface.send_hud_message(message))
         )
         self.apmp1_file = apmp1_file
 
     def on_deathlink(self, data: Utils.Dict[str, Utils.Any]) -> None:
         super().on_deathlink(data)
-        self.game_interface.set_alive(False)
+        # FIXME
+        Utils.async_start(self.game_interface.set_alive(False))
 
     async def server_auth(self, password_requested: bool = False):
         if password_requested and not self.password:
@@ -195,7 +200,7 @@ async def dolphin_sync_task(ctx: MetroidPrimeContext):
 
     while not ctx.exit_event.is_set():
         try:
-            connection_state = ctx.game_interface.get_connection_state()
+            connection_state = await ctx.game_interface.get_connection_state()
             update_connection_status(ctx, connection_state)
             if connection_state == ConnectionState.IN_MENU:
                 await handle_check_goal_complete(
@@ -230,7 +235,7 @@ async def handle_checked_location(
 
 async def handle_check_goal_complete(ctx: MetroidPrimeContext):
     if ctx.game_interface.current_game:
-        current_level = ctx.game_interface.get_current_level()
+        current_level = await ctx.game_interface.get_current_level()
         if current_level == MetroidPrimeLevel.End_of_Game:
             await ctx.send_msgs(
                 [{"cmd": "StatusUpdate", "status": ClientStatus.CLIENT_GOAL}]
@@ -238,7 +243,7 @@ async def handle_check_goal_complete(ctx: MetroidPrimeContext):
 
 
 async def handle_tracker_level(ctx: MetroidPrimeContext):
-    current_level = ctx.game_interface.get_current_level()
+    current_level = await ctx.game_interface.get_current_level()
     if current_level is None:
         level = 0
     else:
@@ -254,7 +259,7 @@ async def handle_tracker_level(ctx: MetroidPrimeContext):
 
 
 async def handle_check_deathlink(ctx: MetroidPrimeContext):
-    health = ctx.game_interface.get_current_health()
+    health = await ctx.game_interface.get_current_health()
     if health <= 0 and ctx.is_pending_death_link_reset == False and ctx.slot:
         await ctx.send_death(ctx.player_names[ctx.slot] + " ran out of energy.")
         ctx.is_pending_death_link_reset = True
@@ -268,8 +273,8 @@ async def _handle_game_ready(ctx: MetroidPrimeContext):
         if not ctx.slot:
             await asyncio.sleep(1)
             return
-        ctx.game_interface.update_relay_tracker_cache()
-        current_inventory = ctx.game_interface.get_current_inventory()
+        await ctx.game_interface.update_relay_tracker_cache()
+        current_inventory = await ctx.game_interface.get_current_inventory()
         await handle_receive_items(ctx, current_inventory)
         ctx.notification_manager.handle_notifications()
         await handle_checked_location(ctx, current_inventory)
@@ -291,7 +296,7 @@ async def _handle_game_not_ready(ctx: MetroidPrimeContext):
     """If the game is not connected or not in a playable state, this will attempt to retry connecting to the game."""
     ctx.game_interface.reset_relay_tracker_cache()
     if ctx.connection_state == ConnectionState.DISCONNECTED:
-        ctx.game_interface.connect_to_game()
+        await ctx.game_interface.connect_to_game()
     elif ctx.connection_state == ConnectionState.IN_MENU:
         await asyncio.sleep(3)
 
