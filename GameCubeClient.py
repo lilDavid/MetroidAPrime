@@ -339,22 +339,63 @@ class NintendontClient(GameCubeClient):
             await self.disconnect()
             raise NintendontException from e
 
+    CHUNK_SIZE = 80
+
     async def read_pointer(self, pointer: int, offset: int, byte_count: int) -> Any:
-        return (await self.__request_operations([pointer], [NintendontOperation.make_read(0, byte_count, offset)]))[0]
+        if byte_count == 0:
+            return (await self.__request_operations([pointer], [NintendontOperation.make_read(0, 0, offset)]))[0]
+
+        results: list[bytes] = []
+        for i in range(0, byte_count, self.CHUNK_SIZE):
+            result = (await self.__request_operations(
+                [pointer],
+                [NintendontOperation.make_read(0, min(byte_count - i, self.CHUNK_SIZE), offset + i)])
+            )[0]
+            if result is None:
+                return None
+            results.append(result)
+        return b''.join(results)
 
     async def read_address(self, address: int, bytes_to_read: int) -> Any:
-        result = (await self.__request_operations([address], [NintendontOperation.make_read(0, bytes_to_read)]))[0]
-        if result == None:
-            raise NintendontException(f"{address:x} -> {address + bytes_to_read:x} is not a valid for GC memory")
-        return result
+        if bytes_to_read == 0:
+            result = (await self.__request_operations([address], [NintendontOperation.make_read(0, 0)]))[0]
+            if result == None:
+                raise NintendontException(f"{address:x} -> {address + bytes_to_read:x} is not a valid for GC memory")
+            return result
 
-    # TODO: Find out what dolphin memory engine write_bytes() returns to match DolphinClient behavior. Currently assumed
-    # to be the original value that was overwritten
+        results: list[bytes] = []
+        for i in range(0, bytes_to_read, self.CHUNK_SIZE):
+            result = (await self.__request_operations(
+                [address + i],
+                [NintendontOperation.make_read(0, min(bytes_to_read - i, self.CHUNK_SIZE))])
+            )[0]
+            if result is None:
+                raise NintendontException(f"{address:x} -> {address + bytes_to_read:x} is not a valid for GC memory")
+            results.append(result)
+        return b''.join(results)
 
     async def write_pointer(self, pointer: int, offset: int, data: Any):
-        return (await self.__request_operations([pointer], [NintendontOperation.make_write(True, 0, cast(bytes, data), offset)]))[0]
+        if data == b'':
+            await self.__request_operations([pointer], [NintendontOperation.make_write(False, 0, b'', offset)])
+            return
 
+        data_bytes = cast(bytes, data)
+        for i in range(0, len(data_bytes), self.CHUNK_SIZE):
+            await self.__request_operations(
+                [pointer],
+                [NintendontOperation.make_write(False, 0, data_bytes[i:i + self.CHUNK_SIZE], offset + i)
+            ])
+
+    # FIXME: Only read_address() raises on bad address. NintendontClient has the same asymmetry to maintain the same
+    # behavior as DolphinClient
     async def write_address(self, address: int, data: Any):
-        # FIXME: Only read_address() raises on bad address. NintendontClient has the same asymmetry to maintain the same
-        # behavior as DolphinClient
-        return (await self.__request_operations([address], [NintendontOperation.make_write(True, 0, cast(bytes, data))]))[0]
+        if data == b'':
+            await self.__request_operations([address], [NintendontOperation.make_write(False, 0, b'')])
+            return
+
+        data_bytes = cast(bytes, data)
+        for i in range(0, len(data_bytes), self.CHUNK_SIZE):
+            await self.__request_operations(
+                [address + i],
+                [NintendontOperation.make_write(False, 0, data_bytes[i:i + self.CHUNK_SIZE])
+            ])

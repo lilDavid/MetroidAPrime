@@ -478,12 +478,7 @@ class MetroidPrimeInterface:
             encoded_message += b"\x00" * num_to_align
 
         assert self.current_game
-        # Nintendont can receive a limited amount of data at a time so send message in 64-byte chunks
-        # TODO: Abstract this away in the NintendontClient somehow
-        for i in range(0, len(encoded_message), 64):
-            await self.gamecube_client.write_address(
-                GAMES[self.current_game]["HUD_MESSAGE_ADDRESS"] + i, encoded_message[i:i + 64]
-            )
+        await self.gamecube_client.write_address(GAMES[self.current_game]["HUD_MESSAGE_ADDRESS"], encoded_message)
 
     def __progressive_beam_to_beam(
         self, charge_beam: SuitUpgrade
