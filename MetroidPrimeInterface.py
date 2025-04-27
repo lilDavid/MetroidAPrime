@@ -291,14 +291,28 @@ class MetroidPrimeInterface:
 
     async def get_current_inventory(self) -> Dict[str, InventoryItemData]:
         MAX_VANILLA_ITEM_ID = 40
+        inventory_bytes = await self.gamecube_client.read_pointer(
+            await self.__get_player_state_pointer(),
+            calculate_item_offset(0),
+            8 * (MAX_VANILLA_ITEM_ID + 1)
+        )
+        if inventory_bytes is None:
+            return {item.id: None for item in item_table.values()}
+        inventory_values = list(struct.iter_unpack(">II", inventory_bytes))
+
         inventory: Dict[str, InventoryItemData] = {}
         for item in item_table.values():
-            i = await self.get_item(item)
-            if i is not None:
-                if item.id <= MAX_VANILLA_ITEM_ID:
-                    inventory[item.name] = i
-                elif item.id in custom_charge_id_to_beam:
-                    inventory[item.name] = i
+            if item.id <= MAX_VANILLA_ITEM_ID:
+                amount, capacity = inventory_values[item.id]
+                i = InventoryItemData(item, amount, capacity)
+                inventory[item.name] = i
+            elif item.id in custom_charge_id_to_beam:
+                beam_upgrade = self.__progressive_beam_to_beam(custom_charge_id_to_beam[item.id])
+                if beam_upgrade is None:
+                    continue
+                amount, capacity = inventory_values[suit_upgrade_table[beam_upgrade.value].id]
+                i = InventoryItemData(item, int(amount >= 2), 1)
+                inventory[item.name] = i
         return inventory
 
     async def get_current_cosmetic_suit(self) -> MetroidPrimeSuit:
