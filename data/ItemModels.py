@@ -30,10 +30,23 @@ class ItemModel(StrEnum):
     EnergyTank = "Energy Tank"
     Wavebuster = "Wavebuster"
     PowerBomb = "Power Bomb"
+    ArtifactTruth = "Artifact of Truth"
+    ArtifactStrength = "Artifact of Strength"
+    ArtifactElder = "Artifact of Elder"
+    ArtifactWild = "Artifact of Wild"
+    ArtifactLifegiver = "Artifact of Lifegiver"
+    ArtifactWarrior = "Artifact of Warrior"
+    ArtifactChozo = "Artifact of Chozo"
+    ArtifactNature = "Artifact of Nature"
+    ArtifactSun = "Artifact of Sun"
+    ArtifactWorld = "Artifact of World"
+    ArtifactSpirit = "Artifact of Spirit"
+    ArtifactNewborn = "Artifact of Newborn"
     Cog = "Cog"
     GameCube = "GameCube"
     Zoomer = "Zoomer"
     Metroid = "Nothing"
+
 
 native_item_mapping: dict[str, str] = {
     SuitUpgrade.Missile_Expansion.value: ItemModel.Missile,
@@ -45,6 +58,7 @@ native_item_mapping: dict[str, str] = {
     ProgressiveUpgrade.Progressive_Ice_Beam.value: ItemModel.IceBeam,
     ProgressiveUpgrade.Progressive_Plasma_Beam.value: ItemModel.PlasmaBeam,
 }
+
 
 remote_item_mapping: dict[tuple[str, str], str] = {
     ("Super Metroid", "Energy Tank"): ItemModel.EnergyTank,
@@ -124,4 +138,26 @@ remote_item_mapping: dict[tuple[str, str], str] = {
     # ("Metroid Zero Mission", "Speed Booster"): ItemModel.BoostBall,
     # ("Metroid Zero Mission", "Hi-Jump"): ItemModel.SpaceJumpBoots,
     ("Metroid Zero Mission", "Space Jump"): ItemModel.SpaceJumpBoots,
+
+    ("Metroid Fusion", "Missile Data"): ItemModel.ShinyMissile,
+    ("Metroid Fusion", "Morph Ball"): ItemModel.MorphBall,
+    ("Metroid Fusion", "Charge Beam"): ItemModel.ChargeBeam,
+    ("Metroid Fusion", "Bomb Data"): ItemModel.MorphBallBomb,
+    # ("Metroid Fusion", "Hi-Jump"): ItemModel.SpaceJumpBoots,
+    # ("Metroid Fusion", "Speed Booster"): ItemModel.BoostBall,
+    ("Metroid Fusion", "Super Missile"): ItemModel.SuperMissile,
+    ("Metroid Fusion", "Varia Suit"): ItemModel.VariaSuit,
+    ("Metroid Fusion", "Ice Missile"): ItemModel.IceSpreader,  # Supers?
+    ("Metroid Fusion", "Wide Beam"): ItemModel.SuperMissile,
+    ("Metroid Fusion", "Power Bomb Data"): ItemModel.PowerBomb,
+    ("Metroid Fusion", "Space Jump"): ItemModel.SpaceJumpBoots,
+    ("Metroid Fusion", "Plasma Beam"): ItemModel.PlasmaBeam,
+    ("Metroid Fusion", "Gravity Suit"): ItemModel.GravitySuit,
+    ("Metroid Fusion", "Diffusion Missile"): ItemModel.IceSpreader,  # Supers? Wavebuster?
+    ("Metroid Fusion", "Wave Beam"): ItemModel.WaveBeam,
+    ("Metroid Fusion", "Ice Beam"): ItemModel.IceBeam,
+    ("Metroid Fusion", "Missile Tank"): ItemModel.Missile,
+    ("Metroid Fusion", "Energy Tank"): ItemModel.EnergyTank,
+    ("Metroid Fusion", "Power Bomb Tank"): ItemModel.PowerBombExpansion,
+    # ("Metroid Fusion", "Infant Metroid"): ItemModel.ArtifactNewborn,
 }
