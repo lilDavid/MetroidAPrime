@@ -31,8 +31,8 @@ Items for other Metroid games appear as their counterparts in Metroid Prime wher
 items appear as one of the following:
 
 - Progression Item: Cog
-- Useful Item: Metroid Model with a random texture
-- Filler Item: Zoomer Model with a random texture
+- Useful Item: Zoomer model with a random texture
+- Filler Item: Metroid model with a random texture
 
 ### What versions of the Metroid Prime are supported?
 
