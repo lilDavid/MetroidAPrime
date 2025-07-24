@@ -376,6 +376,17 @@ class MetroidPrimeInterface:
                 inventory_item.current_capacity,
             )
 
+    def get_scans(self) -> Dict[int, bool]:
+        """Gets the state of each scan by its asset ID"""
+        vector_bytes = self.dolphin_client.read_pointer(
+            self.__get_player_state_pointer(), 0x170 + self.__get_vector_item_offset(), struct.calcsize(">iiI")
+        )
+        length, _capacity, item_pointer = struct.unpack(">iiI", vector_bytes)
+        item_bytes = self.dolphin_client.read_address(
+            item_pointer, length * struct.calcsize(">If")
+        )
+        return {asset_id: progress >= 1.0 for asset_id, progress in struct.iter_unpack(">If", item_bytes)}
+
     def connect_to_game(self):
         """Initializes the connection to dolphin and verifies it is connected to Metroid Prime"""
         try:
