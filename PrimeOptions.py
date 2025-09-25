@@ -410,6 +410,16 @@ class HudColorOverrideBlue(Range):
     default = 0
 
 
+class DisplayNonLocalItems(Choice):
+    """0 to 255, sets the Blue channel of the HUD color."""
+
+    display_name = "Display Non-Local Items"
+    option_none = 0
+    option_match_game = 1
+    option_match_series = 2
+    default = 0
+
+
 @dataclass
 class MetroidPrimeOptions(PerGameCommonOptions):
     start_inventory_from_pool: StartInventoryPool
@@ -455,6 +465,7 @@ class MetroidPrimeOptions(PerGameCommonOptions):
     varia_suit_color: VariaSuitColorOverride
     gravity_suit_color: GravitySuitColorOverride
     phazon_suit_color: PhazonSuitColorOverride
+    display_nonlocal_items: DisplayNonLocalItems
 
     death_link: DeathLink
 
@@ -523,6 +534,7 @@ prime_option_groups = [
             VariaSuitColorOverride,
             GravitySuitColorOverride,
             PhazonSuitColorOverride,
+            DisplayNonLocalItems,
         ],
     ),
 ]
