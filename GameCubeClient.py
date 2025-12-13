@@ -4,7 +4,7 @@ from enum import IntEnum, IntFlag
 import itertools
 from logging import Logger
 import struct
-from typing import Any, NamedTuple, cast
+from typing import NamedTuple
 import dolphin_memory_engine  # type: ignore
 import subprocess
 import Utils
@@ -26,7 +26,7 @@ class NintendontException(GameCubeException):
 
 class GameCubeClient(ABC):
     @abstractmethod
-    def is_connected(self):
+    def is_connected(self) -> bool:
         ...
 
     @abstractmethod
@@ -38,19 +38,19 @@ class GameCubeClient(ABC):
         ...
 
     @abstractmethod
-    async def read_pointer(self, pointer: int, offset: int, byte_count: int) -> Any:
+    async def read_pointer(self, pointer: int, offset: int, byte_count: int) -> bytes | None:
         ...
 
     @abstractmethod
-    async def read_address(self, address: int, bytes_to_read: int) -> Any:
+    async def read_address(self, address: int, bytes_to_read: int) -> bytes:
         ...
 
     @abstractmethod
-    async def write_pointer(self, pointer: int, offset: int, data: Any):
+    async def write_pointer(self, pointer: int, offset: int, data: bytes):
         ...
 
     @abstractmethod
-    async def write_address(self, address: int, data: Any):
+    async def write_address(self, address: int, data: bytes):
         ...
 
 
@@ -94,14 +94,14 @@ class DolphinClient(GameCubeClient):
             self.__disconnect()
             raise DolphinException(e)
 
-    async def verify_target_address(self, target_address: int, read_size: int):
+    def verify_target_address(self, target_address: int, read_size: int):
         """Ensures that the target address is within the valid range for GC memory"""
         if target_address < 0x80000000 or target_address + read_size > 0x81800000:
             raise DolphinException(
                 f"{target_address:x} -> {target_address + read_size:x} is not a valid for GC memory"
             )
 
-    async def read_pointer(self, pointer: int, offset: int, byte_count: int) -> Any:
+    async def read_pointer(self, pointer: int, offset: int, byte_count: int) -> bytes | None:
         self.__assert_connected()
 
         address = None
@@ -116,13 +116,13 @@ class DolphinClient(GameCubeClient):
         address += offset
         return await self.read_address(address, byte_count)
 
-    async def read_address(self, address: int, bytes_to_read: int) -> Any:
+    async def read_address(self, address: int, bytes_to_read: int) -> bytes:
         self.__assert_connected()
         self.verify_target_address(address, bytes_to_read)
         result = self.dolphin.read_bytes(address, bytes_to_read)
         return result
 
-    async def write_pointer(self, pointer: int, offset: int, data: Any):
+    async def write_pointer(self, pointer: int, offset: int, data: bytes):
         self.__assert_connected()
         address = None
         try:
@@ -136,7 +136,7 @@ class DolphinClient(GameCubeClient):
         address += offset
         return await self.write_address(address, data)
 
-    async def write_address(self, address: int, data: Any):
+    async def write_address(self, address: int, data: bytes):
         self.__assert_connected()
         result = self.dolphin.write_bytes(address, data)
         return result
@@ -209,7 +209,7 @@ class NintendontOperation(NamedTuple):
         return cls(header, size, indirect_offset, None)
 
     @classmethod
-    def make_write(cls, read: int, address_index: int, data: bytes, indirect_offset: int | None = None):
+    def make_write(cls, read: bool, address_index: int, data: bytes, indirect_offset: int | None = None):
         header = NintendontOperationHeader.make(read, True, False, indirect_offset is not None, address_index)
         return cls(header, len(data), indirect_offset, data)
 
@@ -236,8 +236,8 @@ class NintendontMetaInfo(NamedTuple):
 class NintendontClient(GameCubeClient):
     address: str | None
     meta_info: NintendontMetaInfo | None
-    reader: asyncio.StreamReader
-    writer: asyncio.StreamWriter
+    reader: asyncio.StreamReader | None
+    writer: asyncio.StreamWriter | None
     stream_lock: asyncio.Lock
     logger: Logger
 
@@ -281,14 +281,15 @@ class NintendontClient(GameCubeClient):
 
     async def disconnect(self):
         try:
-            if self.meta_info is not None:
+            if self.writer is not None:
                 self.writer.close()
                 await self.writer.wait_closed()
-        except TimeoutError:
+        except (TimeoutError, OSError):
             pass
         self.reader = self.writer = self.meta_info = None
 
     async def __request_operations(self, addresses: list[int], memory_operations: list[NintendontOperation]) -> list[bytes | None]:
+        assert self.meta_info is not None
         if len(addresses) > self.meta_info.max_addresses:
             raise NintendontException(f"Too many addresses: Max is {self.meta_info.max_addresses}, got {len(addresses)}")
 
@@ -319,6 +320,7 @@ class NintendontClient(GameCubeClient):
         return results
 
     async def __atomic_request(self, data: bytes | bytearray) -> bytes:
+        assert self.reader is not None and self.writer is not None
         try:
             await self.stream_lock.acquire()
             self.writer.write(data)
@@ -341,7 +343,7 @@ class NintendontClient(GameCubeClient):
 
     CHUNK_SIZE = 80
 
-    async def read_pointer(self, pointer: int, offset: int, byte_count: int) -> Any:
+    async def read_pointer(self, pointer: int, offset: int, byte_count: int) -> bytes | None:
         if byte_count == 0:
             return (await self.__request_operations([pointer], [NintendontOperation.make_read(0, 0, offset)]))[0]
 
@@ -356,10 +358,10 @@ class NintendontClient(GameCubeClient):
             results.append(result)
         return b''.join(results)
 
-    async def read_address(self, address: int, bytes_to_read: int) -> Any:
+    async def read_address(self, address: int, bytes_to_read: int) -> bytes:
         if bytes_to_read == 0:
             result = (await self.__request_operations([address], [NintendontOperation.make_read(0, 0)]))[0]
-            if result == None:
+            if result is None:
                 raise NintendontException(f"{address:x} -> {address + bytes_to_read:x} is not a valid for GC memory")
             return result
 
@@ -374,28 +376,26 @@ class NintendontClient(GameCubeClient):
             results.append(result)
         return b''.join(results)
 
-    async def write_pointer(self, pointer: int, offset: int, data: Any):
+    async def write_pointer(self, pointer: int, offset: int, data: bytes):
         if data == b'':
             await self.__request_operations([pointer], [NintendontOperation.make_write(False, 0, b'', offset)])
             return
 
-        data_bytes = cast(bytes, data)
-        for i in range(0, len(data_bytes), self.CHUNK_SIZE):
+        for i in range(0, len(data), self.CHUNK_SIZE):
             await self.__request_operations(
                 [pointer],
-                [NintendontOperation.make_write(False, 0, data_bytes[i:i + self.CHUNK_SIZE], offset + i)
+                [NintendontOperation.make_write(False, 0, data[i:i + self.CHUNK_SIZE], offset + i)
             ])
 
     # FIXME: Only read_address() raises on bad address. NintendontClient has the same asymmetry to maintain the same
     # behavior as DolphinClient
-    async def write_address(self, address: int, data: Any):
+    async def write_address(self, address: int, data: bytes):
         if data == b'':
             await self.__request_operations([address], [NintendontOperation.make_write(False, 0, b'')])
             return
 
-        data_bytes = cast(bytes, data)
-        for i in range(0, len(data_bytes), self.CHUNK_SIZE):
+        for i in range(0, len(data), self.CHUNK_SIZE):
             await self.__request_operations(
                 [address + i],
-                [NintendontOperation.make_write(False, 0, data_bytes[i:i + self.CHUNK_SIZE])
+                [NintendontOperation.make_write(False, 0, data[i:i + self.CHUNK_SIZE])
             ])

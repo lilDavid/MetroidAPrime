@@ -197,7 +197,7 @@ class MetroidPrimeInterface:
     connection_status: str
     logger: Logger
     _previous_message_size: int = 0
-    game_id_error: Optional[str] = None
+    game_id_error: Optional[bytes] = None
     game_rev_error: int
     current_game: Optional[str] = None
     relay_trackers: Optional[Dict[Any, Any]]
@@ -214,6 +214,7 @@ class MetroidPrimeInterface:
             await self.gamecube_client.disconnect()
             self.gamecube_client = NintendontClient(self.logger)
         if address is not None:
+            assert type(self.gamecube_client) is NintendontClient
             await self.gamecube_client.set_address(address)
 
     async def give_item_to_player(
@@ -289,7 +290,7 @@ class MetroidPrimeInterface:
                 return InventoryItemData(item_data, current_ammount, current_capacity)
         return None
 
-    async def get_current_inventory(self) -> Dict[str, InventoryItemData]:
+    async def get_current_inventory(self) -> Dict[str, InventoryItemData] | None:
         MAX_VANILLA_ITEM_ID = 40
         inventory_bytes = await self.gamecube_client.read_pointer(
             await self.__get_player_state_pointer(),
@@ -297,7 +298,7 @@ class MetroidPrimeInterface:
             8 * (MAX_VANILLA_ITEM_ID + 1)
         )
         if inventory_bytes is None:
-            return {item.id: None for item in item_table.values()}
+            return None
         inventory_values = list(struct.iter_unpack(">II", inventory_bytes))
 
         inventory: Dict[str, InventoryItemData] = {}
@@ -315,9 +316,11 @@ class MetroidPrimeInterface:
                 inventory[item.name] = i
         return inventory
 
-    async def get_current_cosmetic_suit(self) -> MetroidPrimeSuit:
+    async def get_current_cosmetic_suit(self) -> MetroidPrimeSuit | None:
         player_state_pointer = await self.__get_player_state_pointer()
         result = await self.gamecube_client.read_pointer(player_state_pointer, 0x20, 4)
+        if result is None:
+            return None
         suit_id = struct.unpack(">I", result)[0]
         return MetroidPrimeSuit(suit_id)
 
@@ -338,18 +341,20 @@ class MetroidPrimeInterface:
             player_state_pointer, 0x20, struct.pack(">I", suit.value)
         )
 
-    async def get_alive(self) -> bool:
+    async def get_alive(self) -> bool | None:
         player_state_pointer = await self.__get_player_state_pointer()
-        value = struct.unpack(
-            ">I", await self.gamecube_client.read_pointer(player_state_pointer, 0, 4)
-        )[0]
+        result = await self.gamecube_client.read_pointer(player_state_pointer, 0, 4)
+        if result is None:
+            return None
+        value = struct.unpack(">I", result)[0]
         return bool(value & (1 << 31))
 
     async def set_alive(self, alive: bool):
         player_state_pointer = await self.__get_player_state_pointer()
-        value = struct.unpack(
-            ">I", await self.gamecube_client.read_pointer(player_state_pointer, 0, 4)
-        )[0]
+        result = await self.gamecube_client.read_pointer(player_state_pointer, 0, 4)
+        if result is None:
+            return
+        value = struct.unpack(">I", result)[0]
         if alive:
             value |= 1 << 31
         else:
@@ -370,10 +375,12 @@ class MetroidPrimeInterface:
             return world_by_id(world_asset_id)
         return None
 
-    async def get_current_health(self) -> float:
+    async def get_current_health(self) -> float | None:
         result = await self.gamecube_client.read_pointer(
             await self.__get_player_state_pointer(), 0xC, 4
         )
+        if result is None:
+            return None
         return struct.unpack(">f", result)[0]
 
     async def set_current_health(self, new_health_amount: float):
@@ -523,14 +530,14 @@ class MetroidPrimeInterface:
         beam_upgrade = self.__progressive_beam_to_beam(charge_beam)
 
         if beam_upgrade is not None:
-            _, cap = struct.unpack(
-                ">II",
-                await self.gamecube_client.read_pointer(
-                    cplayer_state,
-                    calculate_item_offset(suit_upgrade_table[beam_upgrade.value].id),
-                    struct.calcsize(">II"),
-                ),
+            upgrade_bytes = await self.gamecube_client.read_pointer(
+                cplayer_state,
+                calculate_item_offset(suit_upgrade_table[beam_upgrade.value].id),
+                struct.calcsize(">II"),
             )
+            if upgrade_bytes is None:
+                return False
+            _, cap = struct.unpack(">II", upgrade_bytes)
             # if beam capacity is 1 we have uncharged beam
             # else we have charge beam if it is 2
             return cap >= 2
@@ -575,23 +582,31 @@ class MetroidPrimeInterface:
         vector_item_ptr = 0x0 + vector_offset
         return vector_item_ptr
 
-    async def __get_area_address(self, area_index: int):
+    async def __get_area_address(self, area_index: int) -> int | None:
         """Gets the address of an area from the world layer state areas vector"""
         vector_bytes = await self.gamecube_client.read_pointer(
             await self.__get_world_layer_state_pointer(), self.__get_vector_item_offset(), 12
         )  # 0x4 is count, 0x8 is max, 0xC is start address of the items in the vector
         # Unpack the bytes into the fields of the Area
+        if vector_bytes is None:
+            return None
         _count, _max, start_address = struct.unpack(">iiI", vector_bytes)
         return start_address + AREA_SIZE * area_index
 
-    async def __get_area(self, area_index: int) -> Area:
+    async def __get_area(self, area_index: int) -> Area | None:
         """Loads an area at the given index for the level the player is currently in"""
         address = await self.__get_area_address(area_index)
+        if address is None:
+            return None
         item_bytes = await self.gamecube_client.read_address(address, AREA_SIZE)
+        if item_bytes is None:
+            return None
         return Area(*struct.unpack(">IIII", item_bytes))
 
     async def set_layer_active(self, area_index: int, layer_id: int, active: bool):
         area = await self.__get_area(area_index)
+        if area is None:
+            return
         if active:
             flag = 1 << layer_id
             area.layerBitsLo = area.layerBitsLo | flag
@@ -609,9 +624,9 @@ class MetroidPrimeInterface:
             area.layerBitsLo,
         )
 
-        await self.gamecube_client.write_address(
-            await self.__get_area_address(area_index), new_bytes
-        )
+        area_address = await self.__get_area_address(area_index)
+        if area_address is not None:
+            await self.gamecube_client.write_address(area_address, new_bytes)
 
     def get_artifact_layer(self, item_id: int):
         # Artifact of truth is handled differently since it is the first thing you interact with in the room
@@ -619,6 +634,8 @@ class MetroidPrimeInterface:
 
     async def get_layer_active(self, area_index: int, layer_id: int):
         area = await self.__get_area(area_index)
+        if area is None:
+            return False
         return area.layerBitsLo & (1 << layer_id) != 0
 
     async def sync_artifact_layers(self):
@@ -626,16 +643,17 @@ class MetroidPrimeInterface:
         if await self.get_current_level() == MetroidPrimeLevel.Tallon_Overworld:
             current_inventory = await self.get_current_inventory()
             # for each item in the inventory, check if it is an artifact and update the layer
-            for item in current_inventory.values():
-                if item.id >= 29 and item.id <= 40:
-                    layer_id = self.get_artifact_layer(item.id)
-                    active = await self.get_layer_active(ARTIFACT_TEMPLE_ROOM_INDEX, layer_id)
-                    if active != (item.current_amount > 0):
-                        await self.set_layer_active(
-                            ARTIFACT_TEMPLE_ROOM_INDEX,
-                            layer_id,
-                            item.current_amount > 0,
-                        )
+            if current_inventory:
+                for item in current_inventory.values():
+                    if item.id >= 29 and item.id <= 40:
+                        layer_id = self.get_artifact_layer(item.id)
+                        active = await self.get_layer_active(ARTIFACT_TEMPLE_ROOM_INDEX, layer_id)
+                        if active != (item.current_amount > 0):
+                            await self.set_layer_active(
+                                ARTIFACT_TEMPLE_ROOM_INDEX,
+                                layer_id,
+                                item.current_amount > 0,
+                            )
 
     def reset_relay_tracker_cache(self):
         self.relay_trackers = None
@@ -645,32 +663,34 @@ class MetroidPrimeInterface:
             self.relay_trackers = {}
             # getting vector<g_GameState.x88_worldStates>
             assert self.current_game
-            world_state_array = struct.unpack(
-                ">I",
-                await self.gamecube_client.read_pointer(
-                    GAMES[self.current_game]["game_state_pointer"],
-                    0x94,
-                    struct.calcsize(">I"),
-                ),
-            )[0]
+            game_state_pointer = await self.gamecube_client.read_pointer(
+                GAMES[self.current_game]["game_state_pointer"],
+                0x94,
+                struct.calcsize(">I"),
+            )
+            if game_state_pointer is None:
+                self.reset_relay_tracker_cache()
+                return
+            world_state_array = struct.unpack(">I", game_state_pointer,)[0]
             world_states = [world_state_array + i * WORLD_STATE_SIZE for i in range(7)]
             for world_state in world_states:
                 # getting WorldState.x0_mlvlId
                 mlvl = struct.unpack(
                     ">I",
-                    await self.gamecube_client.read_address(
-                        world_state, struct.calcsize(">I")
-                    ),
+                    await self.gamecube_client.read_address(world_state, struct.calcsize(">I")),
                 )[0]
+                relay_address = await self.gamecube_client.read_pointer(
+                    world_state + 8,
+                    0,
+                    struct.calcsize(">I")
+                )
+                if relay_address is None:
+                    self.reset_relay_tracker_cache()
+                    return
                 self.relay_trackers[f"{mlvl:X}"] = {
                     # getting WorldState.x8_mailbox.x0_relays
                     # which is an array of memory relays active in the selected world
-                    "address": struct.unpack(
-                        ">I",
-                        await self.gamecube_client.read_pointer(
-                            world_state + 8, 0, struct.calcsize(">I")
-                        ),
-                    )[0],
+                    "address": struct.unpack(">I", relay_address)[0],
                     "count": 0,
                     "memory_relays": [],
                 }

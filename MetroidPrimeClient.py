@@ -85,9 +85,9 @@ class MetroidPrimeCommandProcessor(ClientCommandProcessor):
                 await self.ctx.game_interface.set_cosmetic_suit_by_id(
                     suit_upgrade_table[suit.value].id
                 )
-                await self.ctx.game_interface.set_current_suit(
-                    await self.ctx.game_interface.get_current_cosmetic_suit()
-                )
+                cosmetic_suit = await self.ctx.game_interface.get_current_cosmetic_suit()
+                if cosmetic_suit is not None:
+                    await self.ctx.game_interface.set_current_suit(cosmetic_suit)
             Utils.async_start(set_suit())
             return
         suit = MetroidPrimeSuit.get_by_key(input)
@@ -133,7 +133,7 @@ class MetroidPrimeContext(CommonContext):
     game_sync_task: Optional[asyncio.Task[Any]] = None
     connection_state = ConnectionState.DISCONNECTED
     has_sent_nintendont_warning = False
-    nintendont_ip = None
+    nintendont_ip: str | None = None
     slot_data: Dict[str, Utils.Any] = {}
     death_link_enabled = False
     gravity_suit_enabled: bool = True
@@ -275,10 +275,12 @@ async def handle_tracker_level(ctx: MetroidPrimeContext):
 
 async def handle_check_deathlink(ctx: MetroidPrimeContext):
     health = await ctx.game_interface.get_current_health()
-    if health <= 0 and ctx.is_pending_death_link_reset == False and ctx.slot:
+    if health is None:
+        return
+    if health <= 0 and not ctx.is_pending_death_link_reset and ctx.slot:
         await ctx.send_death(ctx.player_names[ctx.slot] + " ran out of energy.")
         ctx.is_pending_death_link_reset = True
-    elif health > 0 and ctx.is_pending_death_link_reset == True:
+    elif health > 0 and ctx.is_pending_death_link_reset:
         ctx.is_pending_death_link_reset = False
 
 
@@ -290,9 +292,10 @@ async def _handle_game_ready(ctx: MetroidPrimeContext):
             return
         await ctx.game_interface.update_relay_tracker_cache()
         current_inventory = await ctx.game_interface.get_current_inventory()
-        await handle_receive_items(ctx, current_inventory)
+        if current_inventory is not None:
+            await handle_receive_items(ctx, current_inventory)
+            await handle_checked_location(ctx, current_inventory)
         await ctx.notification_manager.handle_notifications()
-        await handle_checked_location(ctx, current_inventory)
         await handle_check_goal_complete(ctx)
         await handle_tracker_level(ctx)
 
