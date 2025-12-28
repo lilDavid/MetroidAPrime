@@ -297,7 +297,7 @@ async def _handle_game_not_ready(ctx: MetroidPrimeContext):
 
 
 async def run_game(romfile: str):
-    auto_start: bool = Utils.get_options()["metroidprime_options"].get(
+    auto_start: bool = Utils.get_settings()["metroidprime_options"].get(
         "rom_start", True
     )
 
@@ -370,7 +370,7 @@ def get_randomprime_config_from_apmp1(apmp1_file: str) -> Dict[str, Any]:
 
 async def patch_and_run_game(apmp1_file: str):
     apmp1_file = os.path.abspath(apmp1_file)
-    input_iso_path = Utils.get_options()["metroidprime_options"]["rom_file"]
+    input_iso_path = Utils.get_settings()["metroidprime_options"]["rom_file"]
     game_version = get_version_from_iso(input_iso_path)
     base_name = os.path.splitext(apmp1_file)[0]
     output_path = base_name + ".iso"
