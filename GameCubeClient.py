@@ -34,7 +34,7 @@ class GameCubeClient(ABC):
         ...
 
     @abstractmethod
-    async def disconnect(self):
+    def disconnect(self):
         ...
 
     @abstractmethod
@@ -77,12 +77,9 @@ class DolphinClient(GameCubeClient):
                 "Could not connect to Dolphin, verify that you have a game running in the emulator"
             )
 
-    def __disconnect(self):
+    def disconnect(self):
         if self.dolphin.is_hooked():
             self.dolphin.un_hook()
-
-    async def disconnect(self):
-        self.__disconnect()
 
     def __assert_connected(self):
         """Custom assert function that returns a DolphinException instead of a generic RuntimeError if the connection is lost"""
@@ -91,7 +88,7 @@ class DolphinClient(GameCubeClient):
             # For some reason the dolphin_memory_engine.is_hooked() function doesn't recognize when the game is closed, checking if memory is available will assert the connection is alive
             self.dolphin.read_bytes(GC_GAME_ID_ADDRESS, 1)
         except RuntimeError as e:
-            self.__disconnect()
+            self.disconnect()
             raise DolphinException(e)
 
     def verify_target_address(self, target_address: int, read_size: int):
@@ -235,27 +232,25 @@ class NintendontMetaInfo(NamedTuple):
 
 class NintendontClient(GameCubeClient):
     address: str | None
+    streams: tuple[asyncio.StreamReader, asyncio.StreamWriter] | None
     meta_info: NintendontMetaInfo | None
-    reader: asyncio.StreamReader | None
-    writer: asyncio.StreamWriter | None
-    stream_lock: asyncio.Lock
+    lock: asyncio.Lock
     logger: Logger
 
     def __init__(self, logger: Logger):
         self.address = None
+        self.streams = None
         self.meta_info = None
-        self.reader = None
-        self.writer = None
-        self.stream_lock = asyncio.Lock()
+        self.lock = asyncio.Lock()
         self.logger = logger
 
     def is_connected(self):
-        return self.address is not None and self.reader is not None and self.writer is not None
+        return self.streams is not None
 
-    async def set_address(self, new_address: str | None):
+    def set_address(self, new_address: str | None):
         if new_address != self.address and self.is_connected():
             self.logger.info("Nintendont address changed, disconnecting.")
-            await self.disconnect()
+            self.disconnect()
         self.address = new_address
 
     async def connect(self):
@@ -263,33 +258,54 @@ class NintendontClient(GameCubeClient):
             raise NintendontException("Address is not set")
 
         try:
-            self.reader, self.writer = await asyncio.open_connection(self.address, NINTENDONT_PORT)
+            self.streams = await asyncio.open_connection(self.address, NINTENDONT_PORT)
         except OSError as e:
             raise NintendontException from e
 
         try:
             data = struct.pack(">BBBB", NintendontMemoryOperationType.REQUEST_VERSION, 0, 0, True)
-            result = await self.__write_to_socket(data)
+            result = await self.__make_request(data)
             self.meta_info = NintendontMetaInfo._make(struct.unpack(">IIII", result))
             self.logger.debug(f"Protocol version: {self.meta_info.protocol_version}")
             self.logger.debug(f"Max input bytes: {self.meta_info.max_input_bytes}")
             self.logger.debug(f"Max output bytes: {self.meta_info.max_output_bytes}")
             self.logger.debug(f"Max addresses: {self.meta_info.max_addresses}")
         except:
-            await self.disconnect()
+            self.disconnect()
             raise
 
-    async def disconnect(self):
-        try:
-            if self.writer is not None:
-                self.writer.close()
-                await self.writer.wait_closed()
-        except (TimeoutError, OSError):
-            pass
-        self.reader = self.writer = self.meta_info = None
+    def disconnect(self):
+        if self.streams is not None:
+            self.streams[1].close()
+            self.streams = self.meta_info = None
+
+    async def __make_request(self, data: bytes | bytearray) -> bytes:
+        async with self.lock:
+            if self.streams is None:
+                raise NintendontException("Not connected to Nintendont")
+            reader, writer = self.streams
+
+            try:
+                writer.write(data)
+                await asyncio.wait_for(writer.drain(), timeout=5)
+                response = await asyncio.wait_for(reader.read(1024), timeout=5)
+
+                if response == b"":
+                    self.disconnect()
+                    raise NintendontException("Connection closed")
+
+                return response
+            except asyncio.TimeoutError as e:
+                self.disconnect()
+                raise NintendontException("Connection timed out") from e
+            except ConnectionResetError as e:
+                self.disconnect()
+                raise NintendontException("Connection reset") from e
 
     async def __request_operations(self, addresses: list[int], memory_operations: list[NintendontOperation]) -> list[bytes | None]:
-        assert self.meta_info is not None
+        if self.meta_info is None:
+            raise NintendontException("Not connected to Nintendont")
+
         if len(addresses) > self.meta_info.max_addresses:
             raise NintendontException(f"Too many addresses: Max is {self.meta_info.max_addresses}, got {len(addresses)}")
 
@@ -298,9 +314,8 @@ class NintendontClient(GameCubeClient):
         data.extend(itertools.chain.from_iterable(struct.pack(">I", address) for address in addresses))
         data.extend(itertools.chain.from_iterable(operation.to_bytes() for operation in memory_operations))
         if len(data) > self.meta_info.max_input_bytes:
-            self.logger.warning(f"Command too long: {data.hex()}")
             raise NintendontException(f"Command too long: Max {self.meta_info.max_input_bytes} bytes, got {len(data)}")
-        response = await self.__write_to_socket(data)
+        response = await self.__make_request(data)
 
         results: list[bytes | None] = []
         current_index = ((len(memory_operations) - 1) // 8 + 1)
@@ -318,28 +333,6 @@ class NintendontClient(GameCubeClient):
             else:
                 results.append(None)
         return results
-
-    async def __atomic_request(self, data: bytes | bytearray) -> bytes:
-        assert self.reader is not None and self.writer is not None
-        try:
-            await self.stream_lock.acquire()
-            self.writer.write(data)
-            await self.writer.drain()
-            return await self.reader.read(1024)
-        finally:
-            self.stream_lock.release()
-
-    async def __write_to_socket(self, data: bytes | bytearray) -> bytes:
-        assert self.reader is not None and self.writer is not None
-        try:
-            response = await self.__atomic_request(data)
-            if response == b'':
-                await self.disconnect()
-                raise NintendontException("Connection was closed")
-            return response
-        except OSError as e:
-            await self.disconnect()
-            raise NintendontException from e
 
     CHUNK_SIZE = 80
 

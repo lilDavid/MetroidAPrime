@@ -213,7 +213,7 @@ async def game_sync_task(ctx: MetroidPrimeContext):
             if ctx.nintendont_ip is not None and not ctx.has_sent_nintendont_warning:
                 logger.warning("Nintendont support is experimental. You may experience bugs or poor performance.")
                 ctx.has_sent_nintendont_warning = True
-            await ctx.game_interface.set_nintendont_ip(ctx.nintendont_ip)
+            ctx.game_interface.set_nintendont_ip(ctx.nintendont_ip)
 
             connection_state = await ctx.game_interface.get_connection_state()
             update_connection_status(ctx, connection_state)
