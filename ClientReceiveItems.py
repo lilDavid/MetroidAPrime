@@ -17,6 +17,12 @@ if TYPE_CHECKING:
 async def handle_receive_items(
     ctx: "MetroidPrimeContext", current_items: Dict[str, InventoryItemData]
 ):
+    # If the server state resets or something, ctx.items_received can get cleared.
+    # Since we depend on len(ctx.items_received) - 1 and the power suit is always in the start inventory,
+    # we can just wait for it to get filled again.
+    if not ctx.items_received:
+        return
+
     # Will be used when consumables are implemented
     # current_index = await ctx.game_interface.get_last_received_index()
     for network_item in ctx.items_received:
