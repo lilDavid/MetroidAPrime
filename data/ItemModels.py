@@ -8,7 +8,7 @@ class ItemModel(StrEnum):
     WaveBeam = "Wave Beam"
     PlasmaBeam = "Plasma Beam"
     Missile = "Missile"
-    ShinyMissile = "ShinyMissile"
+    ShinyMissile = "Shiny Missile"
     ScanVisor = "Scan Visor"
     MorphBallBomb = "Morph Ball Bomb"
     PowerBombExpansion = "Power Bomb Expansion"
