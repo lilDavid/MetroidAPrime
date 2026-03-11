@@ -21,6 +21,8 @@ GAMES: Dict[str, Any] = {
         "game_rev": 0,
         "game_state_pointer": _SYMBOLS["0-00"]["g_GameState"],
         "cstate_manager_global": _SYMBOLS["0-00"]["g_StateManager"],
+        "aMetroidPrimeA": 0x803D47CC,
+        "aMetroidPrimeB": 0x803D47DB,
         "cplayer_vtable": 0x803D96E8,
         "HUD_MESSAGE_ADDRESS": 0x803EFB90,
         "HUD_TRIGGER_ADDRESS": 0x80572414,  # When this is 1 the game will display the message and then set it back to 0
@@ -30,6 +32,8 @@ GAMES: Dict[str, Any] = {
         "game_rev": 1,
         "game_state_pointer": _SYMBOLS["0-01"]["g_GameState"],
         "cstate_manager_global": _SYMBOLS["0-01"]["g_StateManager"],
+        "aMetroidPrimeA": 0x803D49AC,
+        "aMetroidPrimeB": 0x803D49BB,
         "cplayer_vtable": 0x803D98C8,
         "HUD_MESSAGE_ADDRESS": 0x803EFD70,
         "HUD_TRIGGER_ADDRESS": 0x805724F4,  # When this is 1 the game will display the message and then set it back to 0
@@ -39,6 +43,8 @@ GAMES: Dict[str, Any] = {
         "game_rev": 2,
         "game_state_pointer": _SYMBOLS["0-02"]["g_GameState"],
         "cstate_manager_global": _SYMBOLS["0-02"]["g_StateManager"],
+        "aMetroidPrimeA": 0x803D588C,
+        "aMetroidPrimeB": 0x803D589B,
         "cplayer_vtable": 0x803DA7A8,
         "HUD_MESSAGE_ADDRESS": 0x803F0BA8,
         "HUD_TRIGGER_ADDRESS": 0x80573494,  # When this is 1 the game will display the message and then set it back to 0
@@ -48,6 +54,7 @@ GAMES: Dict[str, Any] = {
         "game_rev": 0,
         "game_state_pointer": _SYMBOLS["jpn"]["g_GameState"],
         "cstate_manager_global": _SYMBOLS["jpn"]["g_StateManager"],
+        "aMetroidPrime": 0x803C0D24,
         "cplayer_vtable": 0x803C5B28,
         "HUD_MESSAGE_ADDRESS": 0x803D89C8,
         "HUD_TRIGGER_ADDRESS": 0x8055B474,  # When this is 1 the game will display the message and then set it back to 0
@@ -57,6 +64,8 @@ GAMES: Dict[str, Any] = {
         "game_rev": 48,
         "game_state_pointer": _SYMBOLS["kor"]["g_GameState"],
         "cstate_manager_global": _SYMBOLS["kor"]["g_StateManager"],
+        "aMetroidPrimeA": 0x803D48DC,
+        "aMetroidPrimeB": 0x803D48EB,
         "cplayer_vtable": 0x803D97E8,
         "HUD_MESSAGE_ADDRESS": 0x803EFC90,
         "HUD_TRIGGER_ADDRESS": 0x805720F4,  # When this is 1 the game will display the message and then set it back to 0
@@ -66,6 +75,7 @@ GAMES: Dict[str, Any] = {
         "game_rev": 0,
         "game_state_pointer": _SYMBOLS["pal"]["g_GameState"],
         "cstate_manager_global": _SYMBOLS["pal"]["g_StateManager"],
+        "aMetroidPrime": 0x803BF304,
         "cplayer_vtable": 0x803C4B88,
         "HUD_MESSAGE_ADDRESS": 0x803D7A28,
         "HUD_TRIGGER_ADDRESS": 0x804344B4,  # When this is 1 the game will display the message and then set it back to 0
@@ -199,6 +209,7 @@ class MetroidPrimeInterface:
     _previous_message_size: int = 0
     game_id_error: Optional[str] = None
     game_rev_error: int
+    is_vanilla_iso: bool = False
     current_game: Optional[str]
     relay_trackers: Optional[Dict[str, dict[str, Union[str, int, list[int]]]]]
 
@@ -387,6 +398,7 @@ class MetroidPrimeInterface:
                 )[0]
             except:
                 game_rev = None
+
             # The first read of the address will be null if the client is faster than the emulator
             self.current_game = None
             for version in _SUPPORTED_VERSIONS:
@@ -407,8 +419,33 @@ class MetroidPrimeInterface:
                 self.game_id_error = game_id
                 if game_rev:
                     self.game_rev_error = game_rev
+
             if self.current_game:
-                self.logger.info("Metroid Prime Disc Version: " + self.current_game)
+                # Check if we play a randomized iso
+                self.is_vanilla_iso = False
+                if self.current_game in ["pal", "jpn"]:
+                    if self.dolphin_client.read_address(GAMES[self.current_game]["aMetroidPrime"], 12) == b"MetroidPrime":
+                        self.current_game = None
+                        self.is_vanilla_iso = True
+                        return
+                else:
+                    _addresses = [
+                        GAMES[self.current_game]["aMetroidPrimeA"],
+                        GAMES[self.current_game]["aMetroidPrimeB"],
+                    ]
+                    for _address in _addresses:
+                        if self.dolphin_client.read_address(_address, 14) in [
+                            b"MetroidPrime A",
+                            b"MetroidPrime B",
+                        ]:
+                            self.current_game = None
+                            self.is_vanilla_iso = True
+                            return
+
+                if self.is_vanilla_iso:
+                    self.logger.info("This game is not randomized!")
+                else:
+                    self.logger.info(f"Metroid Prime Disc Version: {self.current_game}")
         except DolphinException:
             pass
 
